@@ -1,0 +1,814 @@
+<?php
+/**
+ * @file
+ * Implements PaySwitch Website Payments Standard Checkout in Drupal Commerce checkout.
+ */
+
+/**
+ * Implements hook_commerce_payment_method_info().
+ */
+function commerce_payswitch_commerce_payment_method_info() {
+  $payment_methods = array();
+
+  $payment_methods['payswitch'] = array(
+                                    'base' => 'commerce_payswitch',
+                                    'title' => t('PaySwitch'),
+                                    'short_title' => t('PaySwitch'),
+                                    'description' => t('PaySwitch Website Payments Standard Checkout'),
+                                    // 'terminal' => FALSE,
+                                    // 'offsite' => TRUE,
+                                    // 'offsite_autoredirect' => TRUE,
+
+                                    // Because the order form generation code does not have access to a payment
+                                    // method info array, we set the bn directly there instead of making use of
+                                    // this buttonsource variable. It's here for consistency with other payment
+                                    // methods in this package.
+                                    'buttonsource' => 'CommerceGuys_Cart_PPS',
+                                  );
+
+  return $payment_methods;
+}
+
+/**
+ * Returns the default settings for the PaySwitch payment method.
+ */
+function commerce_payswitch_default_settings() {
+
+  $default_currency = commerce_default_currency();
+
+  return array(
+          'merchant_id' => '',
+          'apiuser' => '',
+          'API_Key' => '', // for testing
+          'mode' => 'test',
+
+          'desc' => '', // Text to be displayed as a short transaction narration.
+          'currency_code' => in_array($default_currency, array_keys(commerce_payswitch_currencies('wps'))) ? $default_currency : 'GHS',
+          'allow_supported_currencies' => FALSE,
+          // 'language' => 'US',
+          // 'payment_action' => 'sale',
+          // 'ipn_logging' => 'notification',
+          // 'receiver_emails' => '',
+          // 'ipn_create_billing_profile' => FALSE,
+          'show_payment_instructions' => FALSE
+        );
+}
+
+/**
+ * Payment method callback: settings form.
+ */
+function commerce_payswitch_settings_form($settings = array()) {
+
+  $form = array();
+
+  // Merge default settings into the stored settings array.
+  $settings = (array) $settings + commerce_payswitch_default_settings();
+
+  $form['merchant_id'] = array(
+    '#type' => 'textfield',
+    '#title' => t('PaySwitch Merchant ID'),
+    '#description' => t('The merchant ID of the PaySwitch account you want to use to receive payments.'),
+    '#default_value' => $settings['merchant_id'],
+    '#required' => TRUE,
+  );
+  $form['apiuser'] = array(
+    '#type' => 'textfield',
+    '#title' => t('PaySwitch username'),
+    '#description' => t('The Username of the PaySwitch account.'),
+    '#default_value' => $settings['apiuser'],
+    '#required' => TRUE,
+  );
+  $form['mode'] = array(
+    '#type' => 'radios',
+    '#title' => t('PaySwitch Mode'),
+    '#options' => array(
+        'test' => ('Test - use for testing, requires a PaySwitch test API Key'),
+        'live' => ('Live - use for processing real transactions, requires a PaySwitch live API Key'),
+    ),
+    '#default_value' => $settings['mode'],
+  );
+  $form['API_Key'] = array(
+    '#type' => 'textfield',
+    '#title' => t('PaySwitch API Key'),
+    '#description' => t('The PaySwitch API key for test or live transactions'),
+    '#default_value' => $settings['API_Key'],
+    '#required' => TRUE,
+  );
+
+  $form['currency_code'] = array(
+    '#type' => 'select',
+    '#title' => t('Default currency'),
+    '#description' => t('Transactions in other currencies will be converted to this currency, so multi-currency sites must be configured to use appropriate conversion rates.'),
+    '#options' => commerce_payswitch_currencies('wps'),
+    '#default_value' => $settings['currency_code'],
+  );
+  $form['allow_supported_currencies'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Allow transactions to use any currency in the options list above.'),
+    '#description' => t('Transactions in unsupported currencies will still be converted into the default currency.'),
+    '#default_value' => $settings['allow_supported_currencies'],
+  );
+  $form['desc'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Transaction Message'),
+    '#description' => t('Text to be displayed as a short transaction narration.'),
+    '#default_value' => $settings['desc'],
+    '#required' => FALSE,
+  );
+  // $form['language'] = array(
+  //   '#type' => 'select',
+  //   '#title' => t('PaySwitch login page language / locale'),
+  //   '#options' => commerce_payswitch_languages(),
+  //   '#default_value' => $settings['language'],
+  // );
+  // $form['payment_action'] = array(
+  //   '#type' => 'radios',
+  //   '#title' => t('Payment action'),
+  //   '#options' => array(
+  //     'sale' => t('Sale - authorize and capture the funds at the time the payment is processed'),
+  //     'authorization' => t('Authorization - reserve funds on the card to be captured later through your PaySwitch account'),
+  //   ),
+  //   '#default_value' => $settings['payment_action'],
+  // );
+  // $form['ipn_logging'] = array(
+  //   '#type' => 'radios',
+  //   '#title' => t('IPN logging'),
+  //   '#options' => array(
+  //     'notification' => t('Log notifications during IPN validation and processing.'),
+  //     'full_ipn' => t('Log notifications with the full IPN during validation and processing (used for debugging).'),
+  //   ),
+  //   '#default_value' => $settings['ipn_logging'],
+  // );
+  // $form['receiver_emails'] = array(
+  //   '#type' => 'textfield',
+  //   '#title' => t('PaySwitch receiver e-mail addresses'),
+  //   '#description' => t('Enter the primary e-mail address for your PaySwitch account if different from the one entered above or a comma separated list of all valid e-mail addresses on the account.') . '<br />' . t('IPNs that originate from payments made to a PaySwitch account whose e-mail address is not in this list will not be processed.'),
+  //   '#default_value' => $settings['receiver_emails'],
+  // );
+  // $form['ipn_create_billing_profile'] = array(
+  //   '#type' => 'checkbox',
+  //   '#title' => t('Create a billing profile based on name and country data in the IPN for any order that does not have one yet.'),
+  //   '#description' => t('This is most useful for sites that do not collect billing information locally but still want to have customer names on orders.'),
+  //   '#default_value' => $settings['ipn_create_billing_profile'],
+  // );
+  $form['show_payment_instructions'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Show a message on the checkout form when PaySwitch is selected telling the customer to "Continue with checkout to complete payment via PaySwitch."'),
+    '#default_value' => $settings['show_payment_instructions'],
+  );
+
+  return $form;
+}
+
+/**
+ * Payment method callback: adds a message to the submission form if enabled in
+ * the payment method settings.
+ */
+function commerce_payswitch_submit_form($payment_method, $pane_values, $checkout_pane, $order) {
+
+  $form = array();
+
+  if (!empty($payment_method['settings']['show_payment_instructions'])) {
+    $form['payswitch_information'] = array(
+      '#markup' => '<span class="commerce-payswitch-info">' . t('(Continue with checkout to complete payment via PaySwitch.)') . '</span>',
+    );
+  }
+
+  return $form;
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ */
+function commerce_payswitch_form_commerce_checkout_form_alter(&$form, &$form_state) {
+  // If this checkout form contains the payment method radios...
+  if (!empty($form['commerce_payment']['payment_method']['#options'])) {
+    // Loop over its options array looking for a PaySwitch option.
+    foreach ($form['commerce_payment']['payment_method']['#options'] as $key => &$value) {
+      list($method_id, $rule_name) = explode('|', $key);
+
+      // If we find PaySwitch...
+      if ($method_id == 'payswitch') {
+        // Prepare the replacement radio button text with icons.
+        $icons = commerce_payswitch_icons();
+        $value = t('!logo PaySwitch - pay securely without sharing your financial information', array('!logo' => $icons['payswitch']));
+        $value .= '<div class="commerce-payswitch-icons"><span class="label">' . t('Includes:') . '</span>' . implode(' ', $icons) . '</div>';
+
+        // Add the CSS.
+        $form['commerce_payment']['payment_method']['#attached']['css'][] = drupal_get_path('module', 'commerce_payswitch') . '/theme/commerce_payswitch.theme.css';
+
+        break;
+      }
+    }
+  }
+}
+
+
+
+
+/**
+ * Payment method callback: redirect form, a wrapper around the module's general
+ *   use function for building a form.
+ */
+/*
+function commerce_payswitch_redirect_form($form, &$form_state, $order, $payment_method){
+  // Return an error if the enabling action's settings haven't been configured.
+
+  if (empty($payment_method['settings']['merchant_id'])) {
+    drupal_set_message( t('PaySwitch is not configured for use. No PaySwitch merchant ID has been specified.'), 'error' );
+    return;
+  }
+  elseif (empty($payment_method['settings']['apiuser'])) {
+    drupal_set_message( t('PaySwitch configuration. No merchant username has been specified.'), 'error' );
+    return;
+  }
+  elseif (empty($payment_method['settings']['API_Key'])) {
+    drupal_set_message( t('PaySwitch configuration. No API Key has been specified.'), 'error' );
+    return;
+  }
+
+  $settings = array(
+                // Return to the previous page when payment is canceled
+                'cancel_return' => url('checkout/' . $order->order_id . '/payment/back/' . $order->data['payment_redirect_key'], array('absolute' => TRUE)),
+
+                // Return to the payment redirect page for processing successful payments
+                'return' => url('checkout/' . $order->order_id . '/payment/return/' . $order->data['payment_redirect_key'], array('absolute' => TRUE)),
+
+                // Specify the current payment method instance ID in the notify_url
+                'payment_method' => $payment_method['instance_id'],
+
+                // Include the application indicator
+                'bn' => $payment_method['buttonsource'],
+              );
+
+  return commerce_payswitch_order_form($form, $form_state, $order, $payment_method['settings'] + $settings);
+}
+
+/**
+ * Payment method callback: redirect form return validation.
+ */
+/*
+function commerce_payswitch_redirect_form_validate($order, $payment_method) {
+  // if (!empty($payment_method['settings']['ipn_logging']) &&
+  //   $payment_method['settings']['ipn_logging'] == 'full_ipn') {
+  //   watchdog('commerce_payswitch', 'Customer returned from PaySwitch with the following POST data:!ipn_data', array('!ipn_data' => '<pre>' . check_plain(print_r($_POST, TRUE)) . '</pre>'), WATCHDOG_NOTICE);
+  // }
+
+  // This may be an unnecessary step, but if for some reason the user does end
+  // up returning at the success URL with a Failed payment, go back.
+  if (!empty($_POST['payment_status']) && $_POST['payment_status'] == 'Failed') {
+    return FALSE;
+  }
+}
+
+/**
+ * Builds a Website Payments Standard Checkout form from an order object.
+ *
+ * @param $order
+ *   The fully loaded order being paid for.
+ * @param $settings
+ *   An array of settings used to build out the form, including:
+ *   - mode: which server to use, either test or live
+ *   - business: the PaySwitch e-mail address the payment submits to
+ *   - cancel_return: the URL PaySwitch should send the user to on cancellation
+ *   - return: the URL PaySwitch should send the user to on successful payment
+ *   - currency_code: the PaySwitch currency code to use for this payment if the
+ *     total for the order is in a non-PaySwitch supported currency
+ *   - language: the PaySwitch language code to use on the payment form
+ *   - payment_action: the PaySwitch payment action to use: sale, authorization,
+ *     or order
+ *   - payment_method: optionally a payment method instance ID to include in the
+ *     IPN notify_url
+ *
+ * @return
+ *   A renderable form array.
+ */
+/*
+function commerce_payswitch_order_form($form, &$form_state, $order, $settings) {
+
+  $wrapper = entity_metadata_wrapper('commerce_order', $order);
+
+  // Determine the currency code to use to actually process the transaction,
+  // which will either be the default currency code or the currency code of the
+  // order if it's supported by PaySwitch if that option is enabled.
+  $currency_code = $settings['currency_code'];
+  $order_currency_code = $wrapper->commerce_order_total->currency_code->value();
+
+  if (!empty($settings['allow_supported_currencies'])
+      && in_array($order_currency_code, array_keys(commerce_payswitch_currencies('wps')))) {
+    $currency_code = $order_currency_code;
+  }
+
+  $amount = $wrapper->commerce_order_total->amount->value();
+
+  // Ensure a default value for the payment_method setting.
+  $settings += array('payment_method' => '');
+
+  $payload = array(
+              // merchant ID provided when you create an account.
+              'merchant_id' => $settings['merchant_id'],
+
+              // Unique transaction reference provided by you and must be 12 digits.
+              'transaction_id' => $order->order_id,
+
+              // Text to be displayed as a short transaction narration.
+              'desc' => $settings['desc'],
+
+              // Amount to charge.
+              'amount' => commerce_payswitch_price_amount( commerce_currency_convert( $amount, $order_currency_code, $currency_code ), $currency_code ),
+
+              // URL to redirect to when transaction is completed.
+              'redirect_url' => $settings['return'],
+
+              // Provide a default email of the customer.
+              'email' => substr( $order->mail, 0, 127 ),
+            );
+
+  // Allow modules to alter parameters of the API request.
+  drupal_alter('commerce_payswitch_order_form_data', $payload, $order);
+
+  $curl = curl_init();
+  curl_setopt_array( $curl, array(
+      CURLOPT_URL => commerce_payswitch_mode_url( $settings['mode'] ),
+      CURLOPT_RETURNTRANSFER => true,
+      CURLOPT_ENCODING => "",
+      CURLOPT_MAXREDIRS => 10,
+      CURLOPT_TIMEOUT => 30,
+      CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+      CURLOPT_CUSTOMREQUEST => "POST",
+      CURLOPT_POSTFIELDS => json_encode( $payload ),
+      CURLOPT_HTTPHEADER => array(
+                              "Authorization: Basic base64_encode(". $settings['apiuser'] .":". $settings['API_Key'] .")",
+                              "Cache-Control: no-cache",
+                              "Content-Type: application/json"
+                            ),
+    )
+  );
+
+  $response = json_decode( curl_exec( $curl ), TRUE );
+
+  // Log any errors to the watchdog.
+  if( $error = curl_error( $curl ) ){
+    watchdog('commerce_payswitch', 'cURL error: @error', array('@error' => $error), WATCHDOG_ERROR);
+    return FALSE;
+  }
+
+  curl_close($curl);
+
+  // {
+  //     "status": "success",
+  //     "code": 200,
+  //     "reason": "Token successfully generated",
+  //     "token": "eU1xSFN5Ky92MUt5dmpnT",
+  //     "checkout_url": "https://test.theteller.net/checkout/checkout/eU1xSFN5Ky92MUt5dmpnT"
+  // }
+
+  // Log the transaction responses
+  watchdog('commerce_payswitch', 'PaySwitch server response: !param', array('!param' => '<pre>' . check_plain(print_r($response, TRUE)) . '</pre>', WATCHDOG_DEBUG));
+
+  // Redirect the user to the PaySwitch payment portal
+  $form['#action'] = !empty( $response ) && $response['code'] == 200 && $response['checkout_url'] ? $response['checkout_url'] : '';
+
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Proceed to PaySwitch'),
+  );
+
+  return $form;
+}
+*/
+
+
+
+/**
+ * Submits an API request to PaySwitch.
+ *
+ * This function is currently used by PaySwitch Payments Pro and Express Checkout.
+ *
+ * This function may be used for any PaySwitch payment method that uses the same
+ * settings array structure as these other payment methods and whose API
+ * requests should be submitted to the same URLs as determined by the function
+ * commerce_payswitch_api_server_url().
+ *
+ * @param $payment_method
+ *   The payment method instance array associated with this API request.
+ * @param $nvp
+ *   The set of name-value pairs describing the transaction to submit.
+ * @param $order
+ *   The order the payment request is being made for.
+ *
+ * @return
+ *   The response array from PaySwitch if successful or FALSE on error.
+ */
+// /*
+function commerce_payswitch_api_request($payment_method, $payload = array(), $order = NULL, $settings) {
+
+  $wrapper = entity_metadata_wrapper('commerce_order', $order);
+
+  // Determine the currency code to use to actually process the transaction,
+  // which will either be the default currency code or the currency code of the
+  // order if it's supported by PaySwitch if that option is enabled.
+  $currency_code = $settings['currency_code'];
+  $order_currency_code = $wrapper->commerce_order_total->currency_code->value();
+
+  if (!empty($settings['allow_supported_currencies'])
+      && in_array($order_currency_code, array_keys(commerce_payswitch_currencies('wps')))) {
+    $currency_code = $order_currency_code;
+  }
+
+  $amount = $wrapper->commerce_order_total->amount->value();
+
+  $payload = array(
+              // merchant ID provided when you create an account.
+              'merchant_id' => $settings['merchant_id'],
+
+              // Unique transaction reference provided by you and must be 12 digits.
+              'transaction_id' => $order->order_id,
+
+              // Text to be displayed as a short transaction narration.
+              'desc' => $settings['desc'],
+
+              // Amount to charge.
+              'amount' => commerce_payswitch_price_amount( commerce_currency_convert( $amount, $order_currency_code, $currency_code ), $currency_code ),
+
+              // URL to redirect to when transaction is completed.
+              'redirect_url' => $settings['return'],
+
+              // Provide a default email of the customer.
+              'email' => substr( $order->mail, 0, 127 ),
+            );
+
+  // Allow modules to alter parameters of the API request.
+  drupal_alter('commerce_payswitch_api_request', $payload, $order, $payment_method);
+
+  $curl = curl_init();
+  curl_setopt_array( $curl, array(
+      CURLOPT_URL => commerce_payswitch_mode_url( $settings['mode'] ),
+      CURLOPT_RETURNTRANSFER => true,
+      CURLOPT_ENCODING => "",
+      CURLOPT_MAXREDIRS => 10,
+      CURLOPT_TIMEOUT => 30,
+      CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+      CURLOPT_CUSTOMREQUEST => "POST",
+      CURLOPT_POSTFIELDS => json_encode( $payload ),
+      CURLOPT_HTTPHEADER => array(
+                              "Authorization: Basic base64_encode(". $settings['apiuser'] .":". $settings['API_Key'] .")",
+                              "Cache-Control: no-cache",
+                              "Content-Type: application/json"
+                            )
+    )
+  );
+
+  $response = curl_exec( $curl );
+
+  // Log any errors to the watchdog.
+  if( $error = curl_error( $curl ) ){
+    watchdog('commerce_payswitch', 'API cURL Request error: @error', array('@error' => $error), WATCHDOG_ERROR);
+    return FALSE;
+  }
+
+  curl_close($curl);
+
+  // {
+  //     "status": "success",
+  //     "code": 200,
+  //     "reason": "Token successfully generated",
+  //     "token": "eU1xSFN5Ky92MUt5dmpnT",
+  //     "checkout_url": "https://test.theteller.net/checkout/checkout/eU1xSFN5Ky92MUt5dmpnT"
+  // }
+
+// print_r( $response );
+
+  // Log the transaction responses
+  watchdog('commerce_payswitch', 'PaySwitch server response: !param', array('!param' => '<pre>' . check_plain(print_r($response, TRUE)) . '</pre>', WATCHDOG_DEBUG));
+
+  if( $response && $response->code == 200 && $response->checkout_url )
+    // redirect the user to Payswitch checkout payment page
+    drupal_goto( $response->checkout_url, array('external' => TRUE));
+
+  return;
+}
+// */
+
+/**
+ * Returns a unique invoice number based on the Order ID and timestamp.
+ */
+// function commerce_payswitch_ipn_invoice($order) {
+//   return $order->order_id . '-' . REQUEST_TIME;
+// }
+
+/**
+ * Formats a price amount into a decimal value as expected by PaySwitch.
+ *
+ * @param $amount
+ *   An integer price amount.
+ * @param $currency_code
+ *   The currency code of the price.
+ *
+ * @return
+ *   The decimal price amount as expected by PaySwitch API servers.
+ */
+function commerce_payswitch_price_amount($amount, $currency_code) {
+  $rounded_amount = commerce_currency_round($amount, commerce_currency_load($currency_code));
+  return number_format(commerce_currency_amount_to_decimal($rounded_amount, $currency_code), 2, '.', '');
+}
+
+/**
+ * Returns the URL to the specified PaySwitch server.
+ *
+ * @param $mode
+ *   Either test or live indicating which mode to get the URL for.
+ *
+ * @return
+ *   The URL to use to submit requests to the PaySwitch server.
+ */
+function commerce_payswitch_mode_url($mode) {
+  switch( $mode ){
+    case 'test': return 'https://test.theteller.net/checkout/initiate';
+    case 'live': return 'https://prod.theteller.net/checkout/initiate';
+  }
+}
+
+/**
+ * Returns an array of PaySwitch payment methods.
+ */
+function commerce_payswitch_payment_methods() {
+
+  return array(
+          // International options
+          'visa' => t('Visa'),
+          'mastercard' => t('Mastercard'),
+
+          // Mobile Money options
+          'mtn' => t('MTN'),
+          'vodafone' => t('Vodafone'),
+          'airtel' => t('Airtel'),
+          'tigo' => t('Tigo'),
+        );
+}
+
+/**
+ * Returns an array of PaySwitch payment method icon img elements.
+ *
+ * @param $methods
+ *   An array of PaySwitch payment method names to include in the icons array; if
+ *   empty, all icons will be returned.
+ *
+ * @return
+ *   The array of themed payment method icons keyed by name: visa, mastercard,
+ *   amex, discover, echeck, payswitch
+ */
+function commerce_payswitch_icons($methods = array()) {
+  $icons = array();
+
+  foreach (commerce_payswitch_payment_methods() as $name => $title) {
+
+    if (empty($methods) || in_array($name, $methods, TRUE)) {
+      $variables = array(
+        'path' => drupal_get_path('module', 'commerce_payswitch') . '/images/' . $name . '.png',
+        'title' => $title,
+        'alt' => $title,
+        'attributes' => array(
+          'class' => array('commerce-payswitch-icon'),
+          'style' => 'margin-right:15px;',
+        ),
+      );
+      $icons[$name] = theme('image', $variables);
+    }
+  }
+
+  return $icons;
+}
+
+/**
+ * Returns an array of all possible currency codes for the different PaySwitch
+ * payment methods.
+ *
+ * @param $method_id
+ *   The ID of the PaySwitch payment method whose currencies should be returned.
+ *
+ * @return
+ *   An associative array of currency codes with keys and values being the
+ *   currency codes accepted by the specified PaySwitch payment method.
+ */
+function commerce_payswitch_currencies($method_id) {
+
+  return drupal_map_assoc(array('AUD', 'BRL', 'CAD', 'CHF', 'CZK',
+                                'DKK', 'EUR', 'GBP', 'HKD', 'HUF',
+                                'ILS', 'INR', 'JPY', 'MXN', 'MYR',
+                                'NOK', 'NZD', 'PHP', 'PLN', 'RUB',
+                                'SEK', 'SGD', 'THB', 'TRY', 'TWD',
+                                'USD', 'GHS'));
+}
+
+/**
+ * Returns an array of all possible language codes.
+ */
+/*
+function commerce_payswitch_languages() {
+  return array(
+    t('By country') => array(
+      'AU' => t('Australia'),
+      'AT' => t('Austria'),
+      'BE' => t('Belgium'),
+      'BR' => t('Brazil'),
+      'CA' => t('Canada'),
+      'CN' => t('China'),
+      'FR' => t('France'),
+      'DE' => t('Germany'),
+      'IT' => t('Italy'),
+      'NL' => t('Netherlands'),
+      'PL' => t('Poland'),
+      'PT' => t('Portugal'),
+      'RU' => t('Russia'),
+      'ES' => t('Spain'),
+      'CH' => t('Switzerland'),
+      'GB' => t('United Kingdom'),
+      'US' => t('United States'),
+    ),
+
+    t('By language') => array(
+      'da_DK' => t('Danish (for Denmark only)'),
+      'he_IL' => t('Hebrew (for all)'),
+      'id_ID' => t('Indonesian (for Indonesia only)'),
+      'jp_JP' => t('Japanese (for Japan only)'),
+      'no_NO' => t('Norwegian (for Norway only)'),
+      'pt_BR' => t('Brazilian Portuguese (for Portugal and Brazil only)'),
+      'ru_RU' => t('Russian (for Lithuania, Latvia, and Ukraine only)'),
+      'sv_SE' => t('Swedish (for Sweden only)'),
+      'th_TH' => t('Thai (for Thailand only)'),
+      'tr_TR' => t('Turkish (for Turkey only)'),
+      'zh_CN' => t('Simplified Chinese (for China only)'),
+      'zh_HK' => t('Traditional Chinese (for Hong Kong only)'),
+      'zh_TW' => t('Traditional Chinese (for Taiwan only)'),
+    ),
+  );
+}
+*/
+
+/**
+ * Payment method callback: validate an IPN based on receiver e-mail address,
+ *   price, and other parameters as possible.
+ */
+ /*
+function commerce_payswitch_payswitch_ipn_validate($order, $payment_method, $ipn) {
+  // Prepare a trimmed list of receiver e-mail addresses.
+  if (!empty($payment_method['settings']['receiver_emails'])) {
+    $receiver_emails = explode(',', $payment_method['settings']['receiver_emails']);
+  }
+  else {
+    $receiver_emails = array();
+  }
+
+  // Add the business e-mail address to the list of addresses.
+  $receiver_emails[] = $payment_method['settings']['business'];
+
+  foreach ($receiver_emails as $key => &$email) {
+    $email = trim(strtolower($email));
+  }
+
+  // Return FALSE if the receiver e-mail does not match one specified by the
+  // payment method instance.
+  if (!in_array(trim(strtolower($ipn['receiver_email'])), $receiver_emails)) {
+    commerce_payment_redirect_pane_previous_page($order);
+    watchdog('commerce_payswitch', 'IPN rejected: invalid receiver e-mail specified (@receiver_email); must match the primary e-mail address on the PaySwitch account.', array('@receiver_email' => $ipn['receiver_email']), WATCHDOG_NOTICE);
+    return FALSE;
+  }
+
+  // Prepare the IPN data for inclusion in the watchdog message if enabled.
+  $ipn_data = '';
+
+  if (!empty($payment_method['settings']['ipn_logging']) &&
+    $payment_method['settings']['ipn_logging'] == 'full_ipn') {
+    $ipn_data = '<pre>' . check_plain(print_r($ipn, TRUE)) . '</pre>';
+  }
+
+  // Log a message including the PaySwitch transaction ID if available.
+  if (!empty($ipn['txn_id'])) {
+    watchdog('commerce_payswitch', 'IPN validated for Order @order_number with ID @txn_id.!ipn_data', array('@order_number' => $order->order_number, '@txn_id' => $ipn['txn_id'], '!ipn_data' => $ipn_data), WATCHDOG_NOTICE);
+  }
+  else {
+    watchdog('commerce_payswitch', 'IPN validated for Order @order_number.!ipn_data', array('@order_number' => $order->order_number, '!ipn_data' => $ipn_data), WATCHDOG_NOTICE);
+  }
+}
+*/
+
+/**
+ * Payment method callback: process an IPN once it's been validated.
+ */
+/*
+function commerce_payswitch_payswitch_ipn_process($order, $payment_method, &$ipn) {
+  // Do not perform any processing on transactions here that do not have
+  // transaction IDs, indicating they are non-payment IPNs such as those used
+  // for subscription signup requests.
+  if (empty($ipn['txn_id'])) {
+    return FALSE;
+  }
+
+  // Exit when we don't get a payment status we recognize.
+  if (!in_array($ipn['payment_status'], array('Failed', 'Voided', 'Pending', 'Completed', 'Refunded'))) {
+    commerce_payment_redirect_pane_previous_page($order);
+    return FALSE;
+  }
+
+  // If this is a prior authorization capture IPN for which we've already
+  // created a transaction...
+  if (in_array($ipn['payment_status'], array('Voided', 'Completed')) &&
+    !empty($ipn['auth_id']) && $auth_ipn = commerce_payswitch_ipn_load($ipn['auth_id'])) {
+    // Load the prior IPN's transaction and update that with the capture values.
+    $transaction = commerce_payment_transaction_load($auth_ipn['transaction_id']);
+  }
+  else {
+    // Create a new payment transaction for the order.
+    $transaction = commerce_payment_transaction_new('payswitch', $order->order_id);
+    $transaction->instance_id = $payment_method['instance_id'];
+  }
+
+  $wrapper = entity_metadata_wrapper('commerce_order', $order);
+  $order_currency_code = $wrapper->commerce_order_total->currency_code->value();
+  $amount = commerce_currency_decimal_to_amount($ipn['mc_gross'], $ipn['mc_currency']);
+  $transaction->amount = commerce_currency_convert($amount, $ipn['mc_currency'], $order_currency_code);
+  $transaction->currency_code = $order_currency_code;
+
+  $transaction->remote_id = $ipn['txn_id'];
+  $transaction->payload[REQUEST_TIME . '-ipn'] = $ipn;
+
+  // Set the transaction's statuses based on the IPN's payment_status.
+  $transaction->remote_status = $ipn['payment_status'];
+
+  // If we didn't get an approval response code...
+  switch ($ipn['payment_status']) {
+    case 'Failed':
+      $transaction->status = COMMERCE_PAYMENT_STATUS_FAILURE;
+      $transaction->message = t("The payment has failed. This happens only if the payment was made from your customer’s bank account.");
+      break;
+
+    case 'Voided':
+      $transaction->status = COMMERCE_PAYMENT_STATUS_FAILURE;
+      $transaction->message = t('The authorization was voided.');
+      break;
+
+    case 'Pending':
+      $transaction->status = COMMERCE_PAYMENT_STATUS_PENDING;
+      $transaction->message = commerce_payswitch_ipn_pending_reason($ipn['pending_reason']);
+      break;
+
+    case 'Completed':
+      $transaction->status = COMMERCE_PAYMENT_STATUS_SUCCESS;
+      $transaction->message = t('The payment has completed.');
+      break;
+
+    case 'Refunded':
+      $transaction->status = COMMERCE_PAYMENT_STATUS_SUCCESS;
+      $transaction->message = t('Refund for transaction @txn_id', array('@txn_id' => $ipn['parent_txn_id']));
+      break;
+  }
+
+  // Save the transaction information.
+  commerce_payment_transaction_save($transaction);
+  $ipn['transaction_id'] = $transaction->transaction_id;
+
+  // Create a billing profile based on the IPN if enabled.
+  if (!empty($payment_method['settings']['ipn_create_billing_profile']) && isset($order->commerce_customer_billing)) {
+    $order_wrapper = entity_metadata_wrapper('commerce_order', $order);
+
+    // If this order does not have a billing profile yet...
+    if ($order_wrapper->commerce_customer_billing->value() === NULL) {
+      // Ensure we have the required data in the IPN.
+      if (empty($ipn['residence_country']) || empty($ipn['first_name']) || empty($ipn['last_name'])) {
+        $data = array_intersect_key($ipn, drupal_map_assoc(array('residence_country', 'first_name', 'last_name')));
+        watchdog('commerce_payswitch', 'A billing profile for Order @order_number could not be created due to insufficient data in the IPN:!data', array('@order_number' => $order->order_number, '!data' => '<pre>'. check_plain(print_r($data, TRUE)) .'</pre>'), WATCHDOG_WARNING);
+      }
+      else {
+        // Create the new profile now.
+        $profile = commerce_customer_profile_new('billing', $order->uid);
+
+        // Prepare an addressfield array to set to the customer profile.
+        $field = field_info_field('commerce_customer_address');
+        $instance = field_info_instance('commerce_customer_profile', 'commerce_customer_address', 'billing');
+        $address = addressfield_default_values($field, $instance);
+
+        // Add the address value.
+        $profile_wrapper = entity_metadata_wrapper('commerce_customer_profile', $profile);
+
+        $profile_wrapper->commerce_customer_address = array_merge($address, array(
+          'country' => $ipn['residence_country'],
+          'name_line' => $ipn['first_name'] . ' ' . $ipn['last_name'],
+          'first_name' => $ipn['first_name'],
+          'last_name' => $ipn['last_name'],
+        ));
+
+        // Save the profile, reference it from the order, and save the order.
+        $profile_wrapper->save();
+        $order_wrapper->commerce_customer_billing = $profile_wrapper;
+        $order_wrapper->save();
+
+        watchdog('commerce_payswitch', 'Billing profile created for Order @order_number containing the first and last names and residence country of the customer based on IPN data.', array('@order_number' => $order->order_number));
+      }
+    }
+  }
+
+  commerce_payment_redirect_pane_next_page($order);
+  watchdog('commerce_payswitch', 'IPN processed for Order @order_number with ID @txn_id.', array('@txn_id' => $ipn['txn_id'], '@order_number' => $order->order_number), WATCHDOG_INFO);
+}
+*/

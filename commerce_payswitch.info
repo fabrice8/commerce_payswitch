@@ -1,0 +1,11 @@
+name = PaySwitch
+description = Implements PaySwitch Website Payments Standard in Drupal Commerce Checkout.
+package = Commerce (PaySwitch)
+dependencies[] = commerce
+dependencies[] = commerce_ui
+dependencies[] = commerce_payment
+dependencies[] = commerce_order
+core = 7.x
+
+; Simple tests
+; files[] = tests/commerce_payswitch.test
